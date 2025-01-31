@@ -12,16 +12,15 @@ namespace TestTasks.WeatherFromAPI
     {
         private const string apiKey = "da30e988baeb89d1d38b46cffee1c4a4";
 
-        private readonly HttpClient _httpClient;
+        private readonly IWeatherApiClient _weatherApiClient;
 
-        public WeatherManager()
+        public WeatherManager() : this(new HttpClient())
         {
-            _httpClient = new HttpClient();
         }
 
         public WeatherManager(HttpClient httpClient)
         {
-            _httpClient = httpClient;
+            _weatherApiClient = new WeatherApiClient(httpClient, apiKey);
         }
 
         // One call api isn`t available for free tier, so I decided to use forecast api
@@ -30,8 +29,8 @@ namespace TestTasks.WeatherFromAPI
         {
             ValidateParameters(cityA, cityB, dayCount);
 
-            GeoResult cityAGeo = await GetCityGeoByName(cityA);
-            GeoResult cityBGeo = await GetCityGeoByName(cityB);
+            GeoResult cityAGeo = await _weatherApiClient.GetCityGeoByName(cityA);
+            GeoResult cityBGeo = await _weatherApiClient.GetCityGeoByName(cityB);
 
             DailyWeatherData[] cityAData = await GetWeatherDataForDays(cityAGeo, dayCount);
             DailyWeatherData[] cityBData = await GetWeatherDataForDays(cityBGeo, dayCount);
@@ -63,26 +62,9 @@ namespace TestTasks.WeatherFromAPI
                 throw new ArgumentException("Day count should be between 1 and 5.", nameof(dayCount));
         }
 
-        private async Task<GeoResult> GetCityGeoByName(string cityName)
-        {
-            string url = $"http://api.openweathermap.org/geo/1.0/direct?q={cityName}&limit=1&appid={apiKey}";
-
-            using var response = await _httpClient.GetAsync(url);
-            await HandleErrors(response);
-
-            var json = await response.Content.ReadAsStringAsync();
-
-            var results = JsonSerializer.Deserialize<GeoResult[]>(json);
-
-            if (results == null || results.Length == 0)
-                throw new ArgumentException($"City '{cityName}' not found.", nameof(cityName));
-
-            return results[0];
-        }
-
         private async Task<DailyWeatherData[]> GetWeatherDataForDays(GeoResult geoResult, int dayCount)
         {
-            var data = await GetForecastRequest(geoResult);
+            var data = await _weatherApiClient.GetWeatherForecast(geoResult);
 
             var results = new DailyWeatherData[dayCount];
 
@@ -115,37 +97,6 @@ namespace TestTasks.WeatherFromAPI
             }
 
             return results;
-        }
-
-        private async Task<WeatherData> GetForecastRequest(GeoResult geoResult)
-        {
-            string url = $"https://api.openweathermap.org/data/2.5/forecast?lat={geoResult.Lat}&lon={geoResult.Lon}&appid={apiKey}&units=metric";
-
-            using var response = await _httpClient.GetAsync(url);
-            await HandleErrors(response);
-
-            var json = await response.Content.ReadAsStringAsync();
-
-            var data = JsonSerializer.Deserialize<WeatherData>(json);
-
-            if (data == null || data.List == null || data.List.Count == 0)
-                throw new ArgumentException($"Data for '{geoResult.Name}' not found.", nameof(geoResult));
-
-            return data;
-        }
-
-        private static async Task HandleErrors(HttpResponseMessage response)
-        {
-            if (!response.IsSuccessStatusCode)
-            {
-                if (response.StatusCode == HttpStatusCode.TooManyRequests)
-                {
-                    throw new HttpRequestException("Too many requests");
-                }
-
-                string errorBody = await response.Content.ReadAsStringAsync();
-                throw new HttpRequestException($"Error response: {response.StatusCode}, body: \n{errorBody}");
-            }
         }
     }
 }
